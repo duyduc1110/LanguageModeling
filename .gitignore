@@ -1,0 +1,13 @@
+# Ignore everything
+*/*
+/*
+
+# Not these directories
+!utils/
+
+# Not these files
+!.gitignore
+!train.ipynb
+!*.py
+
+
