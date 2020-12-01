@@ -4,6 +4,7 @@
 
 # Not these directories
 !utils/
+!linformer/
 
 # Not these files
 !.gitignore
