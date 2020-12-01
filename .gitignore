@@ -5,6 +5,7 @@
 # Not these directories
 !utils/
 !linformer/
+!performer/
 
 # Not these files
 !.gitignore
