@@ -3,7 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from reversible import ReversibleSequence, SequentialSequence
+from linformer.reversible import ReversibleSequence, SequentialSequence
 
 # helper functions
 
