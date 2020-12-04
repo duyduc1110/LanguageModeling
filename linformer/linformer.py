@@ -155,10 +155,15 @@ class LinformerLM(nn.Module):
         self.pos_emb = nn.Embedding(seq_len, dim)
         self.linformer = Linformer(dim, seq_len, depth, k = k, heads = heads, dim_head = dim_head, one_kv_head = one_kv_head, share_kv = share_kv, reversible = reversible)
         self.to_logits = nn.Linear(dim, num_tokens)
+        self.loss_fct = torch.nn.functional.cross_entropy
 
-    def forward(self, x):
+    def forward(self, x, labels):
         x = self.token_emb(x)
         x = self.pos_emb(torch.arange(x.shape[1], device=x.device)) + x
         x = self.linformer(x)
         out = self.to_logits(x)
-        return out
+        if labels is not None:
+            masked_lm_loss = self.loss_fct(out.view(-1, out.size(-1)), labels.view(-1))
+            return {'loss': masked_lm_loss, 'logits': out}
+        else:
+            return {'logits': out}
