@@ -1,77 +1,58 @@
-import transformers
 import torch
-import time
+import numpy as np
 
 from torch.utils.data import Dataset, DataLoader, RandomSampler
 
 
 class BonzDataset(Dataset):
-    def __init__(self, data, tokenizer, mlm_prob=0.15):
+    def __init__(self, data, tokenizer,):
         self.data = data
         self.tokenizer = tokenizer
-        self.mlm_prob = mlm_prob
 
     def __len__(self):
         return len(self.data)
 
-    def mask_token(self, inputs):
-        labels = inputs.clone()
-
-        # Sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
-        probability_matrix = torch.full(labels.shape, self.mlm_prob)
-
-        # Create special_token matrix
-        special_tokens_mask = self.tokenizer.get_special_tokens_mask(labels, already_has_special_tokens=True)
-        special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
-
-        probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
-        masked_indices = torch.bernoulli(probability_matrix).bool()
-        labels[~masked_indices] = -100  # Only compute loss on masked tokens
-
-        # Replace masked input tokens with tokenizer.mask_token ([MASK])
-        indices_replaced = torch.bernoulli(torch.full(labels.shape, 1.0)).bool() & masked_indices
-        inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
-
-        return inputs, labels
-
     def __getitem__(self, idx):
-        inputs = self.tokenizer(self.data[idx], padding='max_length', return_tensors='pt')
-        inputs = {k: inputs[k].squeeze(0) for k in inputs}
-
-        #inputs['input_ids'], inputs['labels'] = self.mask_token(inputs['input_ids'])
+        #inputs = self.tokenizer.encode(self.data[idx]['sentences'], padding='max_length', truncation=True, return_tensors='pt').squeeze(0)
+        inputs = self.tokenizer.encode(self.data[idx]['sentences'], padding='max_length', truncation=True,)
         return inputs
 
 
 class BonzDataCollar():
     def __init__(self, tokenizer, mlm_prob=0.15):
         self.tokenizer = tokenizer
+        self.all_special_ids = np.array(self.tokenizer.all_special_ids)
         self.mlm_prob = mlm_prob
 
     def mask_token(self, examples):
-        inputs = examples['input_ids']
-        labels = inputs.clone()
+        inputs = np.array(examples)
+        labels = np.copy(inputs)
 
         # Sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
-        probability_matrix = torch.full(labels.shape, self.mlm_prob)
+        probability_matrix = np.full(inputs.shape, self.mlm_prob)
 
         # Create special_token matrix
-        special_tokens_mask = [self.tokenizer.get_special_tokens_mask(label, already_has_special_tokens=True) for label in labels]
-        special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
+        special_tokens_mask = np.isin(inputs, self.all_special_ids)
+        probability_matrix[special_tokens_mask] = 0
 
-        probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
-        masked_indices = torch.bernoulli(probability_matrix).bool()
-        labels[~masked_indices] = -100  # Only compute loss on masked tokens
+        # Create mask indices with binominal
+        masked_indices = np.random.binomial(1, probability_matrix).astype(np.bool)
+        labels[~masked_indices] = -100
 
-        # Replace masked input tokens with tokenizer.mask_token ([MASK])
-        indices_replaced = torch.bernoulli(torch.full(labels.shape, 1.0)).bool() & masked_indices
-        inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+        # Replace masked inputs with masked token ids
+        inputs[masked_indices] = self.tokenizer.mask_token_id
 
-        examples['inputs_ids'] = inputs
-        examples['labels'] = labels
+        '''
+        print(inputs.tolist())
+        print(special_tokens_mask.tolist())
+        print(probability_matrix.tolist())
+        print(masked_indices.tolist())
+        print(labels.tolist())
+        print(inputs.tolist())
+        '''
 
-        return examples
+        return {'x': torch.tensor(inputs).long(), 'labels': torch.tensor(labels).long()}
 
     def __call__(self, examples):
         return self.mask_token(examples)
-
 

@@ -8,29 +8,6 @@ from torch.utils.data import Dataset, DataLoader, RandomSampler
 from linformer.linformer import LinformerLM
 
 
-class BonzDataset(Dataset):
-    def __init__(self, df, tokenizer):
-        super(BonzDataset, self).__init__()
-        self.df = df
-        self.tokenizer = tokenizer
-
-    def __len__(self):
-        return self.df.shape[0]
-
-    def __getitem__(self, idx):
-        input_ids = self.tokenizer.encode(self.df[idx]['text'].tolist()[0], padding='max_length', truncation=True,
-                                          return_tensors='pt').squeeze(0)
-        for i in range(1, 1000):
-            concated_text = ' '.join(self.df[idx: idx + i + 1]['text'].tolist())
-            temp = self.tokenizer.encode(concated_text, padding='max_length', truncation=True,
-                                         return_tensors='pt').squeeze(0)
-            if temp[-1] == self.tokenizer.pad_token_id:
-                input_ids = temp
-            else:
-                break
-        return {'input_ids': input_ids}
-
-
 # Load Dataset
 dataset = load_dataset('bookcorpus', split='train')
 dataset.set_format('pandas')
