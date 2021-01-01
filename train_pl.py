@@ -137,6 +137,7 @@ if __name__ == '__main__':
     # Create trainer
     trainer = pl.Trainer(logger=wandb_logger,
                          callbacks=[lr_monitor],
+                         benchmark=True,
                          log_every_n_steps=args.log_step,
                          accelerator='ddp',
                          amp_level='native',
@@ -145,6 +146,7 @@ if __name__ == '__main__':
                          profiler='simple',
                          weights_save_path='./model_weight',
                          max_steps=args.training_step,
+                         reload_dataloaders_every_epoch=True,
                          #plugins=['ddp_sharded'],
                          #weights_summary='full'
                          )
