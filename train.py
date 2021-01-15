@@ -1,11 +1,10 @@
 import torch
 
-from utils import BonzDataset, BonzDataCollar
+from bonz_model.utils import BonzDataset, BonzDataCollar
 from datasets import load_dataset
-from tqdm.auto import tqdm, trange
-from transformers import BertTokenizerFast, ReformerConfig, ReformerForMaskedLM
-from torch.utils.data import Dataset, DataLoader, RandomSampler
-from linformer.linformer import LinformerLM
+from transformers import BertTokenizerFast
+from torch.utils.data import DataLoader, RandomSampler
+from bonz_model.linformer import LinformerLM
 
 
 # Load Dataset

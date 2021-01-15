@@ -3,14 +3,10 @@
 /*
 
 # Not these directories
-!utils/
-!linformer/
-!performer/
+!bonz_model/
 
 # Not these files
 !.gitignore
-!train.ipynb
-!dataset.ipynb
 !*.py
 
 

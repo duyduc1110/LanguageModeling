@@ -4,14 +4,13 @@ from torch import nn
 import torch.nn.functional as F
 import logging
 
-from linformer.reversible import ReversibleSequence, SequentialSequence
+from bonz_model.reversible import ReversibleSequence, SequentialSequence
 
 
 model_logger = logging.getLogger('Linformer-logger')
-GELU = nn.GELU
-
 
 # helper functions
+
 def default(val, default_val):
     return val if val is not None else default_val
 
@@ -23,22 +22,8 @@ def init_(tensor):
     return tensor
 
 
-class BonzConfig():
-    def __init__(self, seq_len=512, emb_dim=768, k_dim=256, drop_out=0.1,
-                 ff_mul=4, kernel_att=1, kernel_ff=1,
-                 eps=1e-12, glu=False):
-        self.seq_len = seq_len
-        self.emb_dim = emb_dim
-        self.k_dim = k_dim
-        self.ff_mul = ff_mul
-        self.dropout = drop_out
-        self.kernel_att = kernel_att
-        self.kernel_ff = kernel_ff
-        self.eps = eps
-        self.glu = glu
-
-
 # helper classes
+
 class Residual(nn.Module):
     def __init__(self, fn):
         super().__init__()
@@ -59,32 +44,35 @@ class PreNorm(nn.Module):
         return self.fn(x)
 
 
+class GELU_(nn.Module):
+    def forward(self, x):
+        return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
+
+
+GELU = nn.GELU if hasattr(nn, 'GELU') else GELU_
+
+
 class FeedForward(nn.Module):
-    def __init__(self, config: BonzConfig, dim, mult=4, dropout=0.1, activation=None, glu=False):
+    def __init__(self, dim, mult=4, dropout=0.1, activation=None, glu=False):
         super().__init__()
         activation = default(activation, GELU)
-        self.glu = config.glu
+
+        self.glu = glu
         self.w1 = nn.Linear(dim, dim * mult * (2 if glu else 1))
-        self.w1 = nn.Conv1d(config.emb_dim,
-                            config.emb_dim * config.ff_mul * 2 if config.glu else config.emb_dim * config.ff_mul,
-                            kernel_size=config.kernel_ff,
-                            padding=int(config.kernel_ff/2))
         self.act = activation()
-        self.dropout1 = nn.Dropout(dropout)
-        self.w2 = nn.Conv1d(config.emb_dim * config.ff_mul, config.emb_dim,
-                            kernel_size=config.kernel_ff,
-                            padding=int(config.kernel_ff/2))
-        self.norm = nn.LayerNorm(dim, eps=1e-12)
+        self.dropout = nn.Dropout(dropout)
+        self.w2 = nn.Linear(dim * mult, dim)
 
     def forward(self, x, **kwargs):
         if not self.glu:
-            x = self.act(self.w1(x))
+            x = self.w1(x)
+            x = self.act(x)
         else:
             x, v = self.w1(x).chunk(2, dim=-1)
             x = self.act(x) * v
 
         x = self.dropout(x)
-        x = self.norm(self.w2(x))
+        x = self.w2(x)
         return x
 
 
@@ -97,7 +85,9 @@ class LinformerSelfAttention(nn.Module):
         self.k = k
 
         self.heads = heads
-        self.dim_head = default(dim_head, dim // heads)
+
+        dim_head = default(dim_head, dim // heads)
+        self.dim_head = dim_head
 
         self.to_q = nn.Linear(dim, dim_head * heads, bias=False)
 
@@ -114,10 +104,9 @@ class LinformerSelfAttention(nn.Module):
         self.to_out = nn.Linear(dim_head * heads, dim)
 
     def forward(self, x, context=None, **kwargs):
-        batch, seq_len, embed_dim = x.shape
-        head_dim, num_head, key_dim = self.dim_head, self.heads, self.k
+        b, n, d, d_h, h, k = *x.shape, self.dim_head, self.heads, self.k
 
-        kv_len = seq_len if context is None else context.shape[1]
+        kv_len = n if context is None else context.shape[1]
         assert kv_len == self.seq_len, f'the sequence length of the key / values must be {self.seq_len} - {kv_len} given'
 
         queries = self.to_q(x)
@@ -137,20 +126,20 @@ class LinformerSelfAttention(nn.Module):
 
         # merge head into batch for queries and key / values
 
-        queries = queries.reshape(batch, seq_len, num_head, -1).transpose(1, 2)
+        queries = queries.reshape(b, n, h, -1).transpose(1, 2)
 
-        merge_key_values = lambda t: t.reshape(batch, key_dim, -1, head_dim).transpose(1, 2).expand(-1, num_head, -1, -1)
+        merge_key_values = lambda t: t.reshape(b, k, -1, d_h).transpose(1, 2).expand(-1, h, -1, -1)
         keys, values = map(merge_key_values, (keys, values))
 
         # attention
 
-        dots = torch.einsum('bhnd,bhkd->bhnk', queries, keys) * (head_dim ** -0.5)
+        dots = torch.einsum('bhnd,bhkd->bhnk', queries, keys) * (d_h ** -0.5)
         attn = dots.softmax(dim=-1)
         attn = self.dropout(attn)
         out = torch.einsum('bhnk,bhkd->bhnd', attn, values)
 
         # split heads
-        out = out.transpose(1, 2).reshape(batch, seq_len, -1)
+        out = out.transpose(1, 2).reshape(b, n, -1)
         return self.to_out(out)
 
 

@@ -13,7 +13,6 @@ class BonzDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        #inputs = self.tokenizer.encode(self.data[idx]['sentences'], padding='max_length', truncation=True, return_tensors='pt').squeeze(0)
         inputs = self.tokenizer.encode(self.data[idx]['sentences'], padding='max_length', truncation=True,)
         return inputs
 
@@ -42,16 +41,9 @@ class BonzDataCollar():
         # Replace masked inputs with masked token ids
         inputs[masked_indices] = self.tokenizer.mask_token_id
 
-        '''
-        print(inputs.tolist())
-        print(special_tokens_mask.tolist())
-        print(probability_matrix.tolist())
-        print(masked_indices.tolist())
-        print(labels.tolist())
-        print(inputs.tolist())
-        '''
-
-        return {'x': torch.tensor(inputs).long(), 'labels': torch.tensor(labels).long()}
+        return {'input_ids': torch.tensor(inputs).long(),
+                'positional_ids': torch.arange(512).unsqueeze(0).expand(torch.tensor(inputs).size()),
+                'labels': torch.tensor(labels).long()}
 
     def __call__(self, examples):
         return self.mask_token(examples)

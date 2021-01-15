@@ -1,14 +1,10 @@
-import torch
-import time
 import logging
-import apex
 import os
 
-from utils import BonzDataset, BonzDataCollar
-from datasets import load_dataset, load_from_disk
+from bonz_model.utils import BonzDataset, BonzDataCollar
+from datasets import load_from_disk
 from transformers import BertTokenizerFast, Trainer, TrainingArguments
-from torch.utils.data import DataLoader, RandomSampler
-from linformer.linformer import LinformerLM
+from bonz_model.linformer import LinformerLM
 
 
 logging.basicConfig(level='INFO')

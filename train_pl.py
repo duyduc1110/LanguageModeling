@@ -1,23 +1,65 @@
-import pytorch_lightning as pl, torch.nn as nn, pandas as pd
+import pytorch_lightning as pl
 import torch
-import transformers
 import argparse
 import logging
 
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
-from linformer.linformer import LinformerLM
+from bonz_model import BonzConfig, BonzLM, BonzClassification
 from transformers import BertTokenizerFast
-from utils import BonzDataset, BonzDataCollar
+from bonz_model.utils import BonzDataset, BonzDataCollar
 from datasets import load_from_disk, load_dataset
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import autocast
 
 
-class LinformerLM_PL(pl.LightningModule):
+'''
+class CheckpointEveryNSteps(pl.Callback):
+    """
+    Save a checkpoint every N steps, instead of Lightning's default that checkpoints
+    based on validation loss.
+    """
+
+    def __init__(
+        self,
+        save_step_frequency,
+        prefix="N-Step-Checkpoint",
+        use_modelcheckpoint_filename=True,
+    ):
+        """
+        Args:
+            save_step_frequency: how often to save in steps
+            prefix: add a prefix to the name, only used if
+                use_modelcheckpoint_filename=False
+            use_modelcheckpoint_filename: just use the ModelCheckpoint callback's
+                default filename, don't use ours.
+        """
+        self.save_step_frequency = save_step_frequency
+        self.prefix = prefix
+        self.use_modelcheckpoint_filename = use_modelcheckpoint_filename
+
+    def on_batch_end(self, trainer: pl.Trainer, _):
+        """ Check if we should save a checkpoint after every train batch """
+        epoch = trainer.current_epoch
+        global_step = trainer.global_step
+        if global_step % self.save_step_frequency == 0:
+            if self.use_modelcheckpoint_filename:
+                filename = trainer.checkpoint_callback.filename
+            else:
+                filename = f"{self.prefix}_{epoch=}_{global_step=}.ckpt"
+            ckpt_path = os.path.join(trainer.checkpoint_callback.dirpath, filename)
+            trainer.save_checkpoint(ckpt_path)
+'''
+
+
+class BonzLM_PL(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.model = LinformerLM(**config)
+
+        self.model = BonzLM(config=BonzConfig(**config))
+        logger.info(self.model)
+        logger.info('MODEL CREATED!!!')
+
         self.save_hyperparameters(config)
         self.train_loss_per_log = 0
 
@@ -33,11 +75,11 @@ class LinformerLM_PL(pl.LightningModule):
             else float("NaN")
         )
         self.log('train/loss_mean', avg_training_loss, logger=True, on_step=True)
-        self.log('num_samples', (batch_idx + 1) * batch['x'].shape[0] * 3, logger=True, on_step=True)
+        self.log('num_samples', (self.global_step + 1) * batch['input_ids'].shape[0] * 3, logger=True, on_step=True)
 
         self.train_loss_per_log += loss.cpu().item()
         self.log('train/loss', self.train_loss_per_log/self.trainer.log_every_n_steps, logger=True, on_step=True)
-        if (batch_idx + 1) % self.trainer.log_every_n_steps == 0:
+        if (self.global_step + 1) % self.trainer.log_every_n_steps == 0:
             self.train_loss_per_log = 0
 
         return loss
@@ -68,20 +110,22 @@ class LinformerLM_PL(pl.LightningModule):
 def get_args():
     model_parser = argparse.ArgumentParser()
 
-    # Model arguments
+    # Model argumentss
     model_parser.add_argument('--logging_level', default='INFO', type=str, help="Set logging level")
     model_parser.add_argument('--model_path', default=None, type=str, help="Model path")
     model_parser.add_argument('--remote', default=True, type=bool, help="Run remote or local")
     model_parser.add_argument('--tokenizer_path', default='bert-base-uncased', type=str, help="Tokenizer path")
-    model_parser.add_argument('--seq_len', default=512, type=int, help="Max sequence length")
-    model_parser.add_argument('--depth', default=12, type=int, help="Number of layers")
-    model_parser.add_argument('--embedding_dim', default=768, type=int, help='Embedding dim', dest='dim')
 
     # Trainer arguments
     model_parser.add_argument('--lr', default=4e-4, type=float, help='Learning rate')
     model_parser.add_argument('--training_step', default=100000, type=int, help='Training steps')
     model_parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
     model_parser.add_argument('--log_step', default=500, type=int, help='Steps per log')
+
+    # Add BonzConfig parameter
+    cf = BonzConfig()
+    for k, v in cf.__dict__.items():
+        model_parser.add_argument(f'--{k}', default=v, type=type(v), help=f'{k}')
 
     args = model_parser.parse_args()
     return args
@@ -93,18 +137,17 @@ def get_tokenizer(args):
 
 def get_model(args, tokenizer):
     config = vars(args)
-    config['num_tokens'] = tokenizer.vocab_size
-    # logger.info(config)
-    model = LinformerLM_PL(config)
-    # logger.info('Model created')
+    model = BonzLM_PL(config)
+
+
     return model
 
 
 if __name__ == '__main__':
     # Get arguments & logger
     args = get_args()
-    # logging.basicConfig(level=args.logging_level)
-    # logger = logging.getLogger('model')
+    logging.basicConfig(level=args.logging_level)
+    logger = logging.getLogger('model')
 
     # Get tokenizer
     tokenizer = get_tokenizer(args)
@@ -148,7 +191,7 @@ if __name__ == '__main__':
                          max_steps=args.training_step,
                          reload_dataloaders_every_epoch=True,
                          #plugins=['ddp_sharded'],
-                         #weights_summary='full'
+                         weights_summary='full',
                          )
 
     trainer.fit(model, train_dataloader)
