@@ -8,6 +8,7 @@ import json
 model_logger = logging.getLogger('Linformer-logger')
 torch.random.manual_seed(42)
 
+
 # helper functions
 def default(val, default_val):
     return val if val is not None else default_val
@@ -321,12 +322,12 @@ class BonzDiscriminator(BonzBaseModel):
         self.loss_fn = nn.BCEWithLogitsLoss()
         self._reset_parameters()
 
-    def forward(self, input_ids, positional_ids=None, labels=None):
+    def forward(self, input_ids, positional_ids=None, special_tokens_mask=None, labels=None):
         attention_out = self.core(input_ids, positional_ids)
         logits: torch.FloatTensor = self.cls_head(attention_out)
 
         if labels is not None:
-            loss = self.loss_fn(logits.view(-1), labels.view(-1).float())
+            loss = self.loss_fn(logits[~special_tokens_mask].view(-1), labels[~special_tokens_mask].view(-1).float())
             return {'loss': loss, 'logits': logits}
         else:
             return {'logits': logits}
@@ -347,7 +348,7 @@ class BonzModelGAN(BonzBaseModel):
         gen_predict = gen_logits.softmax(-1).argmax(-1).long()  # Predictions from Generator
         dis_labels = self.generate_labels(input_ids, gen_predict, original_ids)
 
-        dis_loss, dis_logits = self.discriminator(original_ids, positional_ids, dis_labels).values()
+        dis_loss, dis_logits = self.discriminator(original_ids, positional_ids, special_tokens_mask, dis_labels).values()
 
         return {
             'gen_loss': gen_loss,

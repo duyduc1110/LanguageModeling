@@ -8,10 +8,11 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 from bonz_model import BonzConfig, BonzLM, BonzClassification, BonzModelGAN
 from transformers import BertTokenizerFast
 from bonz_model.utils import BonzDataset, BonzDataCollar
-from datasets import load_from_disk, load_dataset
+from datasets import load_from_disk, load_dataset, concatenate_datasets
 from torch.cuda.amp import autocast
 
 torch.random.manual_seed(42)
+
 
 '''
 class CheckpointEveryNSteps(pl.Callback):
@@ -67,8 +68,13 @@ class BonzDataModule(pl.LightningDataModule):
         self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased', max_len=512)
         self.args = args
 
+    def get_train_dataset(self):
+        bookcorpus = load_from_disk('/home/bert1130/datasets/bookcorpus/')
+        wikitext = load_from_disk('/home/bert1130/datasets/wikitext/')
+        return concatenate_datasets([bookcorpus, wikitext])
+
     def train_dataloader(self, **kwargs):
-        dataset = load_from_disk('/home/bert1130/datasets/bookcorpus/')
+        dataset = self.get_train_dataset()
         train_dataset = BonzDataset(dataset, self.tokenizer)
         data_collator = BonzDataCollar(self.tokenizer, mlm_prob=0.15)
         train_dataloader = torch.utils.data.DataLoader(train_dataset,
@@ -88,7 +94,21 @@ class BonzLM_PL(pl.LightningModule):
                                   dis_config=BonzConfig(**config))
 
         self.save_hyperparameters(config)
-        self.train_loss_per_log = 0
+        # Log metrics
+        self.total_loss_per_log = 0
+        self.gen_loss_per_log = 0
+        self.dis_loss_per_log = 0
+
+    def loss_accumulation(self, gen_loss, dis_loss):
+        self.total_loss_per_log += (gen_loss + dis_loss)
+        self.gen_loss_per_log += gen_loss
+        self.dis_loss_per_log += dis_loss
+
+    def should_reset_loss(self):
+        if (self.global_step + 1) % self.trainer.log_every_n_steps == 0:
+            self.total_loss_per_log = 0
+            self.gen_loss_per_log = 0
+            self.dis_loss_per_log = 0
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         with autocast():
@@ -109,14 +129,17 @@ class BonzLM_PL(pl.LightningModule):
         # Logging when training
         self.log('num_samples', (self.global_step + 1) * batch['input_ids'].shape[0] * 3, logger=True, on_step=True)
 
-        total_loss = gen_loss + dis_loss
-        self.train_loss_per_log += total_loss.cpu()
-        self.log('train/loss', self.train_loss_per_log/self.trainer.log_every_n_steps, logger=True, on_step=True)
-        if (self.global_step + 1) % self.trainer.log_every_n_steps == 0:
-            self.train_loss_per_log = 0
+        # Store losses
+        self.loss_accumulation(gen_loss.cpu().item(), dis_loss.cpu().item())
 
-        self.log('gen_loss', gen_loss, logger=True, on_step=True)
-        self.log('dis_loss', dis_loss, logger=True, on_step=True)
+        # Logging all losses
+        total_loss = (gen_loss + dis_loss).cpu().item()
+        self.log('train/total_loss', self.total_loss_per_log/self.trainer.log_every_n_steps, logger=True, on_step=True, on_epoch=False)
+        self.log('train/gen_loss', self.gen_loss_per_log/self.trainer.log_every_n_steps, logger=True, on_step=True, on_epoch=False)
+        self.log('train/dis_loss', self.dis_loss_per_log/self.trainer.log_every_n_steps, logger=True, on_step=True, on_epoch=False)
+        self.should_reset_loss()
+
+        # Logging total loss to the progress bar
         self.log('l', total_loss, prog_bar=True, logger=False, on_step=True)
 
     def configure_optimizers(self):
@@ -168,6 +191,7 @@ def get_args():
     # Model argumentss
     model_parser.add_argument('--logging_level', default='INFO', type=str, help="Set logging level")
     model_parser.add_argument('--model_path', default=None, type=str, help="Model path")
+    model_parser.add_argument('--run_name', default=None, type=str, help="Run name to put in WanDB")
     model_parser.add_argument('--remote', default=True, type=bool, help="Run remote or local")
     model_parser.add_argument('--tokenizer_path', default='bert-base-uncased', type=str, help="Tokenizer path")
 
@@ -214,16 +238,18 @@ if __name__ == '__main__':
     data_module = BonzDataModule(args)
 
     # Define logger
-    wandb_logger = WandbLogger(name=f'BonzGAN_{tokenizer.vocab_size}_{args.lr:.0e}OneCycleLR_batch{args.batch_size}',
-                               project='LanguamgeModeling',
-                               )
+    wandb_logger = WandbLogger(
+        name=f'{args.run_name}' if args.run_name is not None else f'BonzGAN_{args.lr:.0e}OneCycleLR_batch{args.batch_size}',
+        project='LanguamgeModeling',
+    )
 
     # Define callbacks:
     lr_monitor = LearningRateMonitor('step')
 
     # Create trainer
     trainer = pl.Trainer(logger=wandb_logger,
-                         gradient_clip_val=0.5,
+                         gradient_clip_val=1,
+                         accumulate_grad_batches=3,
                          automatic_optimization=False,
                          callbacks=[lr_monitor, PrintOutModelCB()],
                          benchmark=True,

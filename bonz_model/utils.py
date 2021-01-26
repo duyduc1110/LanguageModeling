@@ -44,9 +44,10 @@ class BonzDataCollar():
         return {'input_ids': torch.tensor(inputs).long(),
                 'original_ids': torch.tensor(examples).long(),
                 'special_tokens_mask': torch.tensor(special_tokens_mask),
-                'positional_ids': torch.arange(512).unsqueeze(0).expand(torch.tensor(inputs).size()),
+                'positional_ids': torch.arange(inputs.shape[1]).unsqueeze(0).expand(torch.tensor(inputs).size()),
                 'labels': torch.tensor(labels).long()}
 
     def __call__(self, examples):
         return self.mask_token(examples)
+
 
