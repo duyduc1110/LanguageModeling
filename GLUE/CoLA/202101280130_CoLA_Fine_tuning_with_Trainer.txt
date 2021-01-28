@@ -1,0 +1,4 @@
+Fine-tuning CoLA with trainer 
+
+{'eval_loss': 0.6036132574081421, 'eval_accuracy': 0.8360498561840843, 'eval_f1': 0.8875739644970414, 'eval_precision': 0.84375, 'eval_recall': 0.9361997226074896, 'eval_runtime': 1.024, 'eval_samples_per_second': 1018.55, 'epoch': 3.0} 
+
