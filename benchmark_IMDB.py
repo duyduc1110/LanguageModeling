@@ -51,6 +51,7 @@ class BonzModel_PL(pl.LightningModule):
         self.config = config
         self.kwargs = kwargs
         self.model = BonzClassification(config)
+        self.save_hyperparameters(config)
 
         # model accuracies
         self.train_acc = pl.metrics.Accuracy()

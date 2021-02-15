@@ -113,18 +113,19 @@ class BonzLM_PL(pl.LightningModule):
         gen_optimizer = torch.optim.AdamW(self.model.generator.parameters(), lr=self.config['lr'], weight_decay=0.001)
         dis_optimizer = torch.optim.AdamW(self.model.discriminator.parameters(), lr=self.config['lr'], weight_decay=0.001)
 
+        TOTAL_STEP = self.config['training_step']
         gen_lr_scheduler = {
             'scheduler': transformers.get_linear_schedule_with_warmup(gen_optimizer,
-                                                                      0.04 * self.config['training_step'],
-                                                                      self.config['training_step']),
+                                                                      0.04 * TOTAL_STEP,
+                                                                      TOTAL_STEP),
             'name': 'train/learning_rate',
             'interval': 'step',
             'frequency': 1}
 
         dis_lr_scheduler = {
             'scheduler': transformers.get_linear_schedule_with_warmup(dis_optimizer,
-                                                                      0.04 * self.config['training_step'],
-                                                                      self.config['training_step']),
+                                                                      0.04 * TOTAL_STEP,
+                                                                      TOTAL_STEP),
             'name': 'train/learning_rate',
             'interval': 'step',
             'frequency': 1}
